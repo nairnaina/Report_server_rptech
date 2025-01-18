@@ -34,10 +34,6 @@ if notification_no:
         try:
             # Split input into a list using newline(\n) as the delimiter
             notification_nos = [num.strip() for num in notification_no.split("\n") if num.strip()]
-            
-
-            if start_date and end_date and start_date > end_date:
-                st.warning("Start Date cannot be after End Date.")
 
             # Prepare query condition
             placeholders = ",".join("?" for _ in notification_nos)
@@ -46,7 +42,7 @@ if notification_no:
             query1 = f"""
             SELECT 
                 BranchMaster.BranchName AS "Branch Name",
-                CAST(n.NotificationNo AS VARCHAR) AS "Notification No",
+                CAST(Notification.NotificationNo AS VARCHAR) AS "Notification No",
                 Notification.CustomerCode AS "Customer Code",
                 CustomerMaster.CustomerName AS "Customer Name",
                 CustomerMaster.PhoneNo AS "Phone No.",
@@ -56,16 +52,25 @@ if notification_no:
                 Notification.CustomerChallanNo AS "Customer Challan No.",
                 Notification.CustomerInvoiceNo AS "Customer Invoice No.",
                 Notification.ChallanNo AS "Challan No.",
+                Notification.CreatedOn AS "Inward Date",
                 Notification.ProductCode AS "Product Code",
                 Notification.ProductSerialNo AS "Product Serial NO.",
+                Notification.IsInWarranty AS "Warranty Status",
                 Notification.WarrantyDate AS "Warranty Date",
                 Notification.Remarks,
                 Notification.Other1 AS "Other",
                 Notification.IsRepairEngMarkOWCID AS "Eng Mark OW/CID",
+                Notification.IsMoveToOwnStock AS "MTOS",
+                Notification.MoveToOwnStockDate AS "MTOS Date",
                 Notification.IsMarkForThirdParty AS "Marked For Third Party",
                 Notification.IsMarkForCRMA_MainBranch AS "Marked For CRMA Main Branch",
                 Notification.IsSendToCRMA_MainBranch AS "Sent to CRMA Main Branch",
+                ie.[Condition] AS "COnditions",
                 Notification.CurrentStatus AS "Current Status",
+                Notification.IsVirtualClosure AS "TAT Closed",
+                Notification.VirtualClosureDate AS "TAT Closed Date",
+                Notification.VirtualClosureComment AS "TAT Closed Comment",
+                Notification.IsFinalClosure AS "Customer Closed",
                 Notification.FinalClosureDate AS "Final Closure Date",
                 Notification.FinalClosureComment AS "Final Closure Comment"
             FROM
@@ -78,7 +83,11 @@ if notification_no:
                 CustomerMaster
             ON
                 Notification.CustomerId = CustomerMaster.CustomerId
-            WHERE Notification.NotificationNo IN ({placeholders});
+            JOIN 
+                IssueEng ie 
+            ON
+                Notification.NotificationId = ie.NotificationId
+             WHERE Notification.NotificationNo IN ({placeholders});
             """
 
             # Query 2: Issue to engineer history
@@ -86,16 +95,22 @@ if notification_no:
             SELECT 
                 bm.BranchName AS "Branch Name",
                 CAST(n.NotificationNo AS VARCHAR) AS "Notification No",
-                ie.IssueLevel AS "Issue Level",
+                n.Quantity AS " Inward Quantity",
+                ie.IssueEngId AS "Portal Eng Id",
+                u.UserId AS "User Name",
+                ie.CreatedOn AS "Issued on",
+                ie.IssueLevel AS "Issue level",
                 ie.Comment,
+                ie.IsAcknowledged AS "Eng Attempted",
                 n.IsRepairEngMarkOWCID AS "Eng Mark OW/CID",
+                ie.MarkOWCIDDate AS "OWCID Date",
                 ie.IsPartConsumed AS "Part Consumed",
                 ie.IsReleased AS "Released",
-                ie.ReleasedDate AS "Realeased Date",
-                ie.[Condition] AS "COnditions",
-                ie.ReIssueDate AS "Re-Issue Date"
+                ie.ReleasedDate AS "Released Date",
+                ie.[Condition] AS "Condition",
+                ie.ReIssueDate AS "Re-issue Date"--no data in table
             FROM
-                Notification n 
+                RashiPortal_Live.dbo.Notification n 
             JOIN
                 BranchMaster bm 
             ON
@@ -104,53 +119,64 @@ if notification_no:
                 IssueEng ie 
             ON
                 n.NotificationId = ie.NotificationId
+            JOIN 
+                usermaster u 
+            ON 	
+                u.UserId = ie.EngineerId 
             WHERE n.NotificationNo IN ({placeholders});
             """
 
             # Query 3: Notification RTV/Sales History
             query3 = f""" 
             SELECT 
-               CAST(n.NotificationNo AS VARCHAR) AS "Notification No",
+                CAST(n.NotificationNo AS VARCHAR) AS "Notification No",
                 r.StockType AS "Type",
                 r.ProductCode AS "Product Code",
                 r.SerialNo AS "Serial No",
                 r.Quantity AS "Quantity",
-                r.PortalRefNo AS "Portal Ref No"
+            --SAP Doc No. (no data in the table)
+                r.PortalRefNo AS "Portal Ref No" --no data in table
             FROM 
-                RTVTransfer r               
+            RTVTransfer r               
             JOIN 
                 Notification n 
-            ON n.NotificationId = r.NotificationId 
+            ON n.NotificationId = r.NotificationId  
             WHERE n.NotificationNo IN ({placeholders});
             """
 
             # Query 4: Notification Outward History
             query4 = f"""
             SELECT 
-               CAST(o.NotificationNo AS VARCHAR) AS "Notification No",
+                CAST(o.NotificationNo AS VARCHAR) AS "Notification No",
                 o.[Action] AS "Action",
                 o.ReturnedProductCode AS "Return Product Code",
+                o.Quantity AS "Returned Quantity",
                 o.ReturnedProductSerialNo AS "Returned Product Serial No",
                 o.Remark AS "Remark",
+                o.IsMarkDeliverForVirtualClosure AS "Marked Delivery",
+                n.VirtualClosureDate AS "TAT Closed Date",
                 o.AfterRejectionActionRemark AS "Rejection Remark",
                 o.CNRef AS "CN Ref",
                 o.CNAmount AS "CN Amount",
-                o.DNRef AS "DN Ref",
-                o.DNAmount AS "DN Amount",
-                o.SIRef AS "SI Ref",
-                o.SIAmount AS "SI Amount",
-                o.VAT_Type AS "VAT Type",
-                o.FinalOutwardRemark AS "Outward Remark",
-                o.OutwardChallanNo AS "Outward Challan No",
-                o.OutwardChallanDate AS "Outward Challan Date",
+                o.DNRef AS "DN Ref", --no data in table
+                o.DNAmount AS "DN Amount",--no data in table
+                o.SIRef AS "SI Ref",--no data in table
+                o.SIAmount AS "SI Amount",--no data in table
+                o.VAT_Type AS "VAT Type",--no data in table
+                o.FinalOutwardRemark AS "Outward Remark",--no data in table
+                o.OutwardChallanNo AS "Outward Challan No",--no data in table
+                o.OutwardChallanDate AS "Outward Challan Date",--no data in table
                 o.SAP_CN_DocNo AS "SAP CN Doc No",
                 o.SAP_CN_Value AS "SAP CN Value",
-                o.SAP_DN_Value AS "SAP DN Value",
-                o.SAP_SI_Value AS "SAP SI Value",
-                sm.SONumber AS "SO Number"
+                o.SAP_DN_Value AS "SAP DN Value",--no data in table
+                o.SAP_SI_Value AS "SAP SI Value",--no data in table
+                sm.SONumber AS "SO Number"--no data in table
             FROM Outward o
             JOIN StockMaster sm 
             ON o.NotificationNo = sm.NotificationNo
+            JOIN 
+                Notification n 
+            ON o.NotificationId = n.NotificationId 
             WHERE o.NotificationNo IN ({placeholders});
             """
 
